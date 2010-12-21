@@ -1,32 +1,19 @@
-# Nitrogen Web Framework for Erlang
 
-Nitrogen is an Erlang-based web framework that allows you to develop
-infinitely scaleable, Ajax-rich web applications using a pure Erlang 
-technology stack.
+- Register nprocreg server.
+- It may not have the right answer, but it won't have the wrong answer.
 
-See the [Nitrogen Project website](http://nitrogenproject.com) for
-additional information.
+- require 'rebar' to be installed in the PATH
 
-### Getting Started
+- nprocreg:get_pid(Key)
+  - Check local registry for answer. If Pid is on a different node, then ask that other node.
+  - If not found, ask all other registries on known nodes, return the first live response.
 
-Download the code and move to the experimental branch.
+- nprocreg:get_pid(Key, Function)
+  - Check local registry for answer. If Pid is on a different node, then ask that other node.
+  - If not found, ask all other registries on known nodes, return the first live response.
+  - If still not found, then start up the function.
+    - spawn_link locally.
+    - link to each nprocreg on other nodes.
+    - register with each running other node.
 
-    git clone git://github.com/rklophaus/nitrogen.git
-    cd nitrogen
-
-Then, run the following...
-
-### On Mac OSX / Linux
-
-    cd Quickstart 
-    ./quickstart.sh
-
-Open your web browser to http://localhost:8000
-
-### Create a New Project
-
-    make rel_inets
-    cd rel/nitrogen
-    bin/nitrogen start
-
-Open your web browser to http://localhost:8000
+- Periodically, ping each node to find other running nprocregs.

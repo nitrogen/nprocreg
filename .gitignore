@@ -8,3 +8,6 @@ TAGS
 builds
 Quickstart/static/nitrogen
 Quickstart/static/doc
+.eunit/
+*.beam
+*.app
