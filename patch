@@ -1,0 +1,192 @@
+diff --git a/.gitattributes b/.gitattributes
+deleted file mode 100644
+index f1802d4..0000000
+--- a/.gitattributes
++++ /dev/null
+@@ -1 +0,0 @@
+-*.tmproj -crlf -diff -merge
+\ No newline at end of file
+diff --git a/.gitignore b/.gitignore
+deleted file mode 100644
+index 67d7659..0000000
+--- a/.gitignore
++++ /dev/null
+@@ -1,13 +0,0 @@
+-*.dump
+-.DS_Store
+-coverage
+-.hgignore
+-*.beam
+-rel/nitrogen
+-TAGS
+-builds
+-Quickstart/static/nitrogen
+-Quickstart/static/doc
+-.eunit/
+-*.beam
+-*.app
+diff --git a/Emakefile b/Emakefile
+new file mode 100644
+index 0000000..a587254
+--- /dev/null
++++ b/Emakefile
+@@ -0,0 +1,23 @@
++% Compile Nitrogen Files.
++{
++    [
++        "./src/*",
++        "./src/*/*"
++    ], 
++    [ 
++        debug_info,
++	{ i, "./include" },
++	{ outdir, "./ebin" }
++    ]
++}.
++
++{ 
++    [
++        "./test/*"
++    ],
++    [ 
++        debug_info,
++	{ i, "./include" },
++	{ outdir, "./ebin" }
++    ]
++}.
+diff --git a/MIT-LICENSE b/MIT-LICENSE
+deleted file mode 100644
+index 9924f2c..0000000
+--- a/MIT-LICENSE
++++ /dev/null
+@@ -1,19 +0,0 @@
+-Copyright (c) 2008-2009 Rusty Klophaus
+-
+-Permission is hereby granted, free of charge, to any person obtaining a copy
+-of this software and associated documentation files (the "Software"), to deal
+-in the Software without restriction, including without limitation the rights
+-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+-copies of the Software, and to permit persons to whom the Software is
+-furnished to do so, subject to the following conditions:
+-
+-The above copyright notice and this permission notice shall be included in
+-all copies or substantial portions of the Software.
+-
+-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+-THE SOFTWARE.
+diff --git a/Makefile b/Makefile
+index 1c3c781..29640f1 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,10 +1,13 @@
+ all: compile
+ 
+ compile:
+-	@rebar compile
++	@mkdir -p ebin
++	@erl \
++		-pa ./ebin \
++		-make
+ 
+ clean:
+-	@rebar clean
++	@rm -rf ./ebin/*.beam
+ 
+ run: compile
+-	erl -pa ./ebin -eval "application:start(nprocreg)."
++	erl -pa ./ebin -eval "application:start(nprocreg)."
+\ No newline at end of file
+diff --git a/Notes.txt b/Notes.txt
+new file mode 100644
+index 0000000..c5e358b
+--- /dev/null
++++ b/Notes.txt
+@@ -0,0 +1,17 @@
++
++- Register nprocreg server.
++- It may not have the right answer, but it won't have the wrong answer.
++
++- nprocreg:get_pid(Key)
++  - Check local registry for answer. If Pid is on a different node, then ask that other node.
++  - If not found, ask all other registries on known nodes, return the first live response.
++
++- nprocreg:get_pid(Key, Function)
++  - Check local registry for answer. If Pid is on a different node, then ask that other node.
++  - If not found, ask all other registries on known nodes, return the first live response.
++  - If still not found, then start up the function.
++    - spawn_link locally.
++    - link to each nprocreg on other nodes.
++    - register with each running other node.
++
++- Periodically, ping each node to find other running nprocregs.
+diff --git a/README.markdown b/README.markdown
+deleted file mode 100644
+index c7ed920..0000000
+--- a/README.markdown
++++ /dev/null
+@@ -1,19 +0,0 @@
+-
+-- Register nprocreg server.
+-- It may not have the right answer, but it won't have the wrong answer.
+-
+-- require 'rebar' to be installed in the PATH
+-
+-- nprocreg:get_pid(Key)
+-  - Check local registry for answer. If Pid is on a different node, then ask that other node.
+-  - If not found, ask all other registries on known nodes, return the first live response.
+-
+-- nprocreg:get_pid(Key, Function)
+-  - Check local registry for answer. If Pid is on a different node, then ask that other node.
+-  - If not found, ask all other registries on known nodes, return the first live response.
+-  - If still not found, then start up the function.
+-    - spawn_link locally.
+-    - link to each nprocreg on other nodes.
+-    - register with each running other node.
+-
+-- Periodically, ping each node to find other running nprocregs.
+diff --git a/ebin/nprocreg.app b/ebin/nprocreg.app
+new file mode 100644
+index 0000000..9d92a0b
+--- /dev/null
++++ b/ebin/nprocreg.app
+@@ -0,0 +1,12 @@
++{application, nprocreg, [
++    {description, "NProcReg - Simple Erlang Process Registry."},
++    {vsn, "0.1"},
++    {modules, [
++        nprocreg_app,
++        nprocreg_sup,
++        nprocreg
++    ]},
++    {applications, [kernel, stdlib]},
++    {registered, []},
++    {mod, {nprocreg_app, []}}
++]}.
+diff --git a/rebar.config b/rebar.config
+deleted file mode 100644
+index 21efd9d..0000000
+--- a/rebar.config
++++ /dev/null
+@@ -1,4 +0,0 @@
+-% -*- Erlang -*-
+-{erl_opts, [fail_on_warning, debug_info]}.
+-{cover_enabled, true}.
+-{xref_checks, [undefined_function_calls]}.
+diff --git a/src/nprocreg.app.src b/src/nprocreg.app.src
+deleted file mode 100644
+index 20cc408..0000000
+--- a/src/nprocreg.app.src
++++ /dev/null
+@@ -1,7 +0,0 @@
+-{application, nprocreg, [
+-    {description, "NProcReg - Simple Erlang Process Registry."},
+-    {vsn, "0.1.1"},
+-    {applications, [kernel, stdlib]},
+-    {registered, []},
+-    {mod, {nprocreg_app, []}}
+-]}.

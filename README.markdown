@@ -1,19 +1,9 @@
+# Nitrogen Process Registry
 
-- Register nprocreg server.
-- It may not have the right answer, but it won't have the wrong answer.
+This is a very simple distributed process registry used in Nitrogen.
+It likely doesn't have many other uses. If you require a more robust
+process registry, check out Ulf Wiger's
+[GProc](https://github.com/uwiger/gproc).
 
-- require 'rebar' to be installed in the PATH
-
-- nprocreg:get_pid(Key)
-  - Check local registry for answer. If Pid is on a different node, then ask that other node.
-  - If not found, ask all other registries on known nodes, return the first live response.
-
-- nprocreg:get_pid(Key, Function)
-  - Check local registry for answer. If Pid is on a different node, then ask that other node.
-  - If not found, ask all other registries on known nodes, return the first live response.
-  - If still not found, then start up the function.
-    - spawn_link locally.
-    - link to each nprocreg on other nodes.
-    - register with each running other node.
-
-- Periodically, ping each node to find other running nprocregs.
+See the [Nitrogen Project website](http://nitrogenproject.com) for
+additional information about Nitrogen.
