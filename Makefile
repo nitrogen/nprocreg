@@ -1,13 +1,10 @@
 all: compile
 
 compile:
-	@mkdir -p ebin
-	@erl \
-		-pa ./ebin \
-		-make
+	@rebar compile
 
 clean:
-	@rm -rf ./ebin/*.beam
+	@rebar clean
 
 run: compile
 	erl -pa ./ebin -eval "application:start(nprocreg)."
