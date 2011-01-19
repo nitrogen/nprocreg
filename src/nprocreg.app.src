@@ -1,7 +1,7 @@
 {application, nprocreg, [
-    {description, "NProcReg - Simple Erlang Process Registry."},
-    {vsn, "0.1.1"},
+    {description,  "Minimal Distributed Erlang Process Registry."},
+    {vsn,          "0.2.0"},
     {applications, [kernel, stdlib]},
-    {registered, []},
-    {mod, {nprocreg_app, []}}
+    {registered,   []},
+    {mod,          {nprocreg_app, []}}
 ]}.
