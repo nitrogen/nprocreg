@@ -1,3 +1,4 @@
+% vim: ts=4 sw=4 et
 % Nitrogen Web Framework for Erlang
 % Copyright (c) 2008-2010 Rusty Klophaus
 % See MIT-LICENSE for licensing information.
@@ -9,7 +10,7 @@
     start_link/0,
     get_pid/1,
     get_pid/2,
-	get_status/0,
+    get_status/0,
     init/1,
     handle_cast/2,
     handle_call/3,
@@ -30,7 +31,7 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 get_pid(Key) ->
-	get_pid(Key, undefined).
+    get_pid(Key, undefined).
 
 get_pid(Key, Function) ->
     %% Try to get the pid from the expected Node first. If that doesn't work, then
@@ -38,44 +39,44 @@ get_pid(Key, Function) ->
     %% find anything and is_function(Function) == true, then spawn off
     %% a new function on the current node.
 
-	%% This will be a list of nodes, with the first node being the most likely candidate for Key
+    %% This will be a list of nodes, with the first node being the most likely candidate for Key
     {ExpectedNode, OtherNodes} = get_nodes(Key),
 
-	case get_pid_from_nodes([ExpectedNode | OtherNodes], Key) of
-		{ok, Pid} ->
-			Pid;
+    case get_pid_from_nodes([ExpectedNode | OtherNodes], Key) of
+        {ok, Pid} ->
+            Pid;
         undefined ->
-			if
-				Function == undefined ->
-					undefined;
-				is_function(Function) ->
-					start_function_on_node(ExpectedNode, Key, Function)
-			end
-	end.
+            if
+                Function == undefined ->
+                    undefined;
+                is_function(Function) ->
+                    start_function_on_node(ExpectedNode, Key, Function)
+            end
+    end.
 
 get_pid_from_nodes([], _) ->
-	undefined;
+    undefined;
 get_pid_from_nodes([Node | Nodes], Key) ->
-	case get_pid_from_node(Node, Key) of
-		{ok, Pid} ->
-			{ok, Pid};
-		undefined ->
-			get_pid_from_nodes(Nodes, Key)
-	end.
+    case get_pid_from_node(Node, Key) of
+        {ok, Pid} ->
+            {ok, Pid};
+        undefined ->
+            get_pid_from_nodes(Nodes, Key)
+    end.
 
 get_pid_from_node(Node,Key) ->
-	gen_server:call({?SERVER, Node}, {get_pid, Key}).
+    gen_server:call({?SERVER, Node}, {get_pid, Key}).
 
 get_nodes() ->
-	[Node || Node <- gen_server:call(?SERVER, get_nodes), net_adm:ping(Node) == pong].
+    [Node || Node <- gen_server:call(?SERVER, get_nodes), net_adm:ping(Node) == pong].
 
 start_function_on_node(Node, Key, Function) ->
-	gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
+    gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
 
 %% Retrieves a list of nodes, with the first node being the most likely candidate for the pid associated with Key
 get_nodes(Key) ->
     %% Get the list of nodes that are alive, sorted in ascending order...
-	Nodes = get_nodes(),
+    Nodes = get_nodes(),
 
     %% Get an MD5 of the Key...
     <<Int:128/integer>> = erlang:md5(term_to_binary(Key)),
@@ -83,13 +84,13 @@ get_nodes(Key) ->
     %% Hash to a node...
     N = (Int rem length(Nodes)) + 1,
     ExpectedNode = lists:nth(N, Nodes),
-	OtherNodes = lists:delete(ExpectedNode,Nodes),
-	{ExpectedNode, OtherNodes}.
+    OtherNodes = lists:delete(ExpectedNode,Nodes),
+    {ExpectedNode, OtherNodes}.
 
 
 get_status() ->
-	_Status = gen_server:call(?SERVER, get_status).
-	
+    _Status = gen_server:call(?SERVER, get_status).
+    
 
 init(_) -> 
     % Detect when a process goes down so that we can remove it from
@@ -102,23 +103,23 @@ init(_) ->
     {ok, #state{ nodes=[{node(), never_expire}] }}.
 
 handle_call(get_status, _From, State) ->
-	%Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
-	NumLocalPids = length(State#state.pids),
-	{reply, NumLocalPids, State};
+    %Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
+    NumLocalPids = length(State#state.pids),
+    {reply, NumLocalPids, State};
 
 handle_call(get_nodes, _From, State) ->
-	Nodes = [Node || {Node, _} <- State#state.nodes],
-	{reply, Nodes, State};
+    Nodes = [Node || {Node, _} <- State#state.nodes],
+    {reply, Nodes, State};
 
 handle_call({start_function, Key, Function}, _From, State) ->
-	{Pid, NewState} = start_function(Key, Function, State),
-	{reply, Pid, NewState};
+    {Pid, NewState} = start_function(Key, Function, State),
+    {reply, Pid, NewState};
 
 handle_call({get_pid, Key}, _From, State) ->
     %% This is called by get_pid_remote. Send back a message with the
     %% Pid if we have it.
     Reply = get_pid_local(Key, State),
-	{reply, Reply, State};
+    {reply, Reply, State};
     
 
 handle_call(Message, _From, _State) ->
@@ -165,8 +166,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 get_pid_local(Key, State) ->
     %% Return the pid if it exists.
-	{_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
-	%error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
+    {_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
+    %error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
     case KF of
         {Key, Pid} ->
             {ok, Pid};
