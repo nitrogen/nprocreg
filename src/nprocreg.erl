@@ -9,6 +9,7 @@
     start_link/0,
     get_pid/1,
     get_pid/2,
+	get_status/0,
     init/1,
     handle_cast/2,
     handle_call/3,
@@ -29,12 +30,66 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 get_pid(Key) ->
-    Node = gen_server:call(?SERVER, {get_node, Key}),
-    gen_server:call({?SERVER, Node}, {get_pid, Key, undefined}).
+	get_pid(Key, undefined).
 
 get_pid(Key, Function) ->
-    Node = gen_server:call(?SERVER, {get_node, Key}),
-    gen_server:call({?SERVER, Node}, {get_pid, Key, Function}).
+    %% Try to get the pid from the expected Node first. If that doesn't work, then
+    %% try to get the pid from one of the other nodes. If we don't
+    %% find anything and is_function(Function) == true, then spawn off
+    %% a new function on the current node.
+
+	%% This will be a list of nodes, with the first node being the most likely candidate for Key
+    {ExpectedNode, OtherNodes} = get_nodes(Key),
+
+	case get_pid_from_nodes([ExpectedNode | OtherNodes], Key) of
+		{ok, Pid} ->
+			Pid;
+        undefined ->
+			if
+				Function == undefined ->
+					undefined;
+				is_function(Function) ->
+					start_function_on_node(ExpectedNode, Key, Function)
+			end
+	end.
+
+get_pid_from_nodes([], _) ->
+	undefined;
+get_pid_from_nodes([Node | Nodes], Key) ->
+	case get_pid_from_node(Node, Key) of
+		{ok, Pid} ->
+			{ok, Pid};
+		undefined ->
+			get_pid_from_nodes(Nodes, Key)
+	end.
+
+get_pid_from_node(Node,Key) ->
+	gen_server:call({?SERVER, Node}, {get_pid, Key}).
+
+get_nodes() ->
+	[Node || Node <- gen_server:call(?SERVER, get_nodes), net_adm:ping(Node) == pong].
+
+start_function_on_node(Node, Key, Function) ->
+	gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
+
+%% Retrieves a list of nodes, with the first node being the most likely candidate for the pid associated with Key
+get_nodes(Key) ->
+    %% Get the list of nodes that are alive, sorted in ascending order...
+	Nodes = get_nodes(),
+
+    %% Get an MD5 of the Key...
+    <<Int:128/integer>> = erlang:md5(term_to_binary(Key)),
+
+    %% Hash to a node...
+    N = (Int rem length(Nodes)) + 1,
+    ExpectedNode = lists:nth(N, Nodes),
+	OtherNodes = lists:delete(ExpectedNode,Nodes),
+	{ExpectedNode, OtherNodes}.
+
+
+get_status() ->
+	_Status = gen_server:call(?SERVER, get_status).
+	
 
 init(_) -> 
     % Detect when a process goes down so that we can remove it from
@@ -46,54 +101,29 @@ init(_) ->
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
     {ok, #state{ nodes=[{node(), never_expire}] }}.
 
-handle_call({get_node, Key}, _From, State) ->
-    %% Get the list of nodes that are alive, sorted in ascending order...
-    Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_adm:ping(Node) == pong]),
+handle_call(get_status, _From, State) ->
+	%Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
+	NumLocalPids = length(State#state.pids),
+	{reply, NumLocalPids, State};
 
-    %% Get an MD5 of the Key...
-    <<Int:128/integer>> = erlang:md5(term_to_binary(Key)),
+handle_call(get_nodes, _From, State) ->
+	Nodes = [Node || {Node, _} <- State#state.nodes],
+	{reply, Nodes, State};
 
-    %% Hash to a node...
-    N = (Int rem length(Nodes)) + 1,
-    Node = lists:nth(N, Nodes),
-    {reply, Node, State};
+handle_call({start_function, Key, Function}, _From, State) ->
+	{Pid, NewState} = start_function(Key, Function, State),
+	{reply, Pid, NewState};
 
-handle_call({get_pid, Key, Function}, _From, State) ->
-    %% Try to get the pid locally first. If that doesn't work, then
-    %% try to get the pid from one of the other nodes. If we don't
-    %% find anything and is_function(Function) == true, then spawn off
-    %% a new function on the current node.
-    case get_pid_local(Key, State) of
-        {ok, LocalPid} ->
-            {reply, LocalPid, State};
-
-        undefined ->
-            case get_pid_remote(Key, State) of
-                {ok, RemotePid} ->
-                    {reply, RemotePid, State};
-
-                undefined when Function == undefined ->
-                    {reply, undefined, State};
-
-                undefined when is_function(Function) ->
-                    {NewPid, NewState} = start_function(Key, Function, State),
-                    {reply, NewPid, NewState} 
-            end
-    end;
+handle_call({get_pid, Key}, _From, State) ->
+    %% This is called by get_pid_remote. Send back a message with the
+    %% Pid if we have it.
+    Reply = get_pid_local(Key, State),
+	{reply, Reply, State};
+    
 
 handle_call(Message, _From, _State) ->
     throw({unhandled_call, Message}).
 
-handle_cast({get_pid, Key, Pid, Ref}, State) ->
-    %% This is called by get_pid_remote. Send back a message with the
-    %% Pid if we have it.
-    case get_pid_local(Key, State) of
-        {ok, LocalPid} ->
-            Pid!{get_pid_response, LocalPid, Ref};
-        undefined ->
-            Pid!{get_pid_response, undefined, Ref}
-    end,
-    {noreply, State};
 
 handle_cast({register_node, Node}, State) ->
     %% Register that we heard from a node. Set the last checkin time to now().
@@ -135,31 +165,15 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 get_pid_local(Key, State) ->
     %% Return the pid if it exists.
-    case lists:keyfind(Key, 1, State#state.pids) of
+	{_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
+	%error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
+    case KF of
         {Key, Pid} ->
             {ok, Pid};
         false ->
             undefined
     end.
 
-get_pid_remote(Key, State) ->
-    %% Ask the other nodes for the pid, collect responses.
-    Nodes = [X || {X, _} <- State#state.nodes, X /= node()],
-    Ref = make_ref(),
-    gen_server:abcast(Nodes, ?SERVER, {get_pid, Key, self(), Ref}),
-    get_pid_remote_collect(Ref, State, length(Nodes)).
-
-get_pid_remote_collect(_, _State, 0) ->
-    undefined;
-get_pid_remote_collect(Ref, State, RepliesRemaining) ->
-    receive
-        {get_pid_response, Pid, Ref} when is_pid(Pid) ->
-            {ok, Pid};
-        {get_pid_response, undefined, Ref} ->
-            get_pid_remote_collect(Ref, State, RepliesRemaining - 1)
-    after ?COLLECT_TIMEOUT ->
-        undefined
-    end.
 
 start_function(Key, Function, State) ->
     %% Create the function, register locally.
