@@ -48,7 +48,8 @@ init(_) ->
 
 handle_call({get_node, Key}, _From, State) ->
     %% Get the list of nodes that are alive, sorted in ascending order...
-    Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_adm:ping(Node) == pong]),
+    Nodes = lists:sort([Node || {Node, _} <- State#state.nodes,
+        (net_adm:ping(Node) == pong) orelse (Node == node())]),
 
     %% Get an MD5 of the Key...
     <<Int:128/integer>> = erlang:md5(term_to_binary(Key)),
