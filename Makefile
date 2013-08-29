@@ -21,3 +21,5 @@ $(DEPS_PLT):
 
 dialyzer: compile $(DEPS_PLT)
 	@(dialyzer --fullpath --plt $(DEPS_PLT) -Wrace_conditions -r ./ebin)
+
+travis: dialyzer
