@@ -22,4 +22,20 @@ $(DEPS_PLT):
 dialyzer: compile $(DEPS_PLT)
 	@(dialyzer --fullpath --plt $(DEPS_PLT) -Wrace_conditions -r ./ebin)
 
-travis: dialyzer
+dialyzer-no-race: compile $(DEPS_PLT)
+	@(dialyzer --fullpath --plt $(DEPS_PLT) -r ./ebin)
+
+# TRAVIS-CI STUFF
+
+ERLANG_VERSION_CHECK := erl -eval "io:format(\"~s\",[erlang:system_info(otp_release)]), halt()."  -noshell
+ERLANG_VERSION = $(shell $(ERLANG_VERSION_CHECK))
+
+travis: $(ERLANG_VERSION)
+
+R15B: dialyzer
+R15B01: dialyzer
+R15B02: dialyzer-no-race
+R15B03: dialyzer
+R16B: dialyzer
+R16B01: dialyzer
+R16B02: dialyzer
