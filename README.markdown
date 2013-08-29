@@ -1,9 +1,12 @@
 # nprocreg - Minimal Distributed Erlang Process Registry
 
-nprocreg is a global process registry built for Nitrogen. The goal
-of nprocreg is to allow Key-based lookups of a Pid, and if no Pid
-is found, to start a new process based on a provided Function,
-load-balanced newly spawned functions across the cluster.
+[![Build Status](https://travis-ci.org/nitrogen/nprocreg.png?branch=master)](https://travis-ci.org/nitrogen/nprocreg)
+
+nprocreg is a global process registry built for the [Nitrogen Web
+Framework](http://nitrogenproject.com). The goal of nprocreg is to allow
+Key-based lookups of a Pid, and if no Pid is found, to start a new process
+based on a provided Function, load-balanced newly spawned functions across the
+cluster.
 
 The nprocreg gen_server, when run on a node in a Nitrogen cluster,
 will automatically connect to other nprocreg servers in other
