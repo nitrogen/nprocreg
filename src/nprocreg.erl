@@ -5,6 +5,7 @@
 
 -module (nprocreg).
 -behaviour (gen_server).
+-include("nprocreg.hrl").
 
 -export([
     start_link/0,
@@ -25,14 +26,21 @@
 -define(NODE_CHATTER_INTERVAL, timer:seconds(5)).
 -define(NODE_TIMEOUT, timer:seconds(10)).
 -define(PRINT(Var), error_logger:info_msg("DEBUG: ~p:~p~n~p~n  ~p~n", [?MODULE, ?LINE, ??Var, Var])).
--record(state, { nodes=[], pids=[] }).
 
+-record(state, {
+        nodes=[]    :: [{node(), last_contact()}],
+        pids=[]     :: [{key(), pid()}] 
+    }).
+
+-spec start_link() -> {ok, pid()}.
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+-spec get_pid(key()) -> undefined | pid().
 get_pid(Key) ->
     get_pid(Key, undefined).
 
+-spec get_pid(key(), undefined | fun()) -> undefined | pid().
 get_pid(Key, Function) ->
     %% Try to get the pid from the expected Node first. If that doesn't work, then
     %% try to get the pid from one of the other nodes. If we don't
@@ -54,7 +62,8 @@ get_pid(Key, Function) ->
             end
     end.
 
-get_pid_from_nodes([], _) ->
+-spec get_pid_from_nodes([node()], key()) -> undefined | {ok, pid()}.      
+get_pid_from_nodes([], _ ) ->
     undefined;
 get_pid_from_nodes([Node | Nodes], Key) ->
     case get_pid_from_node(Node, Key) of
@@ -64,18 +73,23 @@ get_pid_from_nodes([Node | Nodes], Key) ->
             get_pid_from_nodes(Nodes, Key)
     end.
 
+-spec get_pid_from_node(node(), key()) -> undefined | {ok, pid()}.
 get_pid_from_node(Node,Key) ->
     gen_server:call({?SERVER, Node}, {get_pid, Key}).
 
-%% Get the list of nodes that are alive, sorted in ascending order...
+-spec get_nodes() -> [node()].
+%% @doc Get the list of nodes that are alive, sorted in ascending order...
 get_nodes() ->
     lists:sort([Node || Node <- gen_server:call(?SERVER, get_nodes),
         (net_adm:ping(Node)=:=pong orelse Node=:=node())]).
 
+-spec start_function_on_node(node(), key(), fun() | undefined) -> {ok, pid()}.
 start_function_on_node(Node, Key, Function) ->
     gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
 
-%% Retrieves a list of nodes, with the first node being the most likely candidate for the pid associated with Key
+-spec get_nodes(key()) -> {node(), [node()]}.
+%% @doc Retrieves a list of nodes, with the first node being the most likely
+%%      candidate for the pid associated with Key
 get_nodes(Key) ->
     Nodes = get_nodes(),
 
@@ -88,11 +102,11 @@ get_nodes(Key) ->
     OtherNodes = lists:delete(ExpectedNode,Nodes),
     {ExpectedNode, OtherNodes}.
 
-
+-spec get_status() -> integer().
 get_status() ->
     _Status = gen_server:call(?SERVER, get_status).
     
-
+-spec init(term()) -> {ok, #state{}}.
 init(_) -> 
     % Detect when a process goes down so that we can remove it from
     % the registry.
@@ -103,6 +117,12 @@ init(_) ->
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
     {ok, #state{ nodes=[{node(), never_expire}] }}.
 
+-spec handle_call(Call  :: get_status
+                        | get_nodes 
+                        | {start_function, key(), fun()} 
+                        | {get_pid, key()}, From :: any(), #state{}
+                        | invalid_message)
+                        -> {reply, Reply :: {ok, pid()} | [node()] | integer(), #state{}}.
 handle_call(get_status, _From, State) ->
     %Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
     NumLocalPids = length(State#state.pids),
@@ -121,12 +141,13 @@ handle_call({get_pid, Key}, _From, State) ->
     %% Pid if we have it.
     Reply = get_pid_local(Key, State),
     {reply, Reply, State};
-    
 
-handle_call(Message, _From, _State) ->
-    throw({unhandled_call, Message}).
+handle_call(Message, From, State) ->
+    error_logger:error_msg("Unhandled Call from ~p: ~p~n",[From,Message]),
+    {reply, invalid_message, State}.
 
-
+-spec handle_cast(Cast  :: {register_node, node()}
+                        | broadcast_node, #state{}) -> {noreply, #state{}}.
 handle_cast({register_node, Node}, State) ->
     %% Register that we heard from a node. Set the last checkin time to now().
     Nodes = State#state.nodes,
@@ -147,9 +168,13 @@ handle_cast(broadcast_node, State) ->
     {noreply, State#state { nodes=NewNodes }};
 
 %% @private
-handle_cast(Message, _State) -> 
-    throw({unhandled_cast, Message}).
+handle_cast(Message, State) -> 
+    error_logger:error_msg("Unhandled Cast: ~p~n",[Message]),
+    {noreply, State}.
 
+-spec handle_info(Info  :: {'EXIT', pid(), Reason :: any()}
+                        | any(), #state{})
+                    -> {noreply, #state{}}.
 %% @private
 handle_info({'EXIT', Pid, _Reason}, State) ->
     %% A process died, so remove it from our list of pids.
@@ -165,6 +190,7 @@ terminate(_Reason, _State) -> ok.
 %% @private
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
+-spec get_pid_local(key(), #state{}) -> undefined | {ok, pid()}.
 get_pid_local(Key, State) ->
     %% Return the pid if it exists.
     {_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
@@ -176,7 +202,7 @@ get_pid_local(Key, State) ->
             undefined
     end.
 
-
+-spec start_function(key(), fun(), #state{}) -> {pid(), #state{}}.
 start_function(Key, Function, State) ->
     %% Create the function, register locally.
     Pid = erlang:spawn_link(Function),
