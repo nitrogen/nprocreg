@@ -54,13 +54,14 @@ get_pid(Key, Function) ->
         {ok, Pid} ->
             Pid;
         undefined ->
-            if
-                Function == undefined ->
-                    undefined;
-                is_function(Function) ->
-                    start_function_on_node(ExpectedNode, Key, Function)
-            end
+            maybe_start_function_on_node(ExpectedNode, Key, Function)
     end.
+
+-spec register_pid(key(), pid()) -> ok.
+register_pid(Key, Pid) ->
+    gen_server:cast({?SERVER, Node}, {register_pid, Key, Pid}).
+
+     
 
 -spec get_pid_from_nodes([node()], key()) -> undefined | {ok, pid()}.      
 get_pid_from_nodes([], _ ) ->
@@ -83,9 +84,15 @@ get_nodes() ->
     lists:sort([Node || Node <- gen_server:call(?SERVER, get_nodes),
         (net_adm:ping(Node)=:=pong orelse Node=:=node())]).
 
+-spec maybe_start_function_on_node(node(), key(), fun() | undefined) -> undefined | {ok, pid()}.
+maybe_start_function_on_node(_Node, _Key, undefined) ->
+    undefined;
+maybe_start_function_on_node(Node, Key, Fun) when is_function(Fun, 1) ->
+    start_function_on_node(Node, Key, Fun).
+
 -spec start_function_on_node(node(), key(), fun() | undefined) -> {ok, pid()}.
-start_function_on_node(Node, Key, Function) ->
-    gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
+start_function_on_node(Node , Key, Function) ->
+    gen_server:cast({?SERVER, Node}, {start_function, Key, Function}).
 
 -spec get_nodes(key()) -> {node(), [node()]}.
 %% @doc Retrieves a list of nodes, with the first node being the most likely
@@ -108,10 +115,6 @@ get_status() ->
     
 -spec init(term()) -> {ok, #state{}}.
 init(_) -> 
-    % Detect when a process goes down so that we can remove it from
-    % the registry.
-    process_flag(trap_exit, true),
-
     %% Broadcast to all nodes at intervals...
     gen_server:cast(?SERVER, broadcast_node),
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
@@ -119,9 +122,7 @@ init(_) ->
 
 -spec handle_call(Call  :: get_status
                         | get_nodes 
-                        | {start_function, key(), fun()} 
-                        | {get_pid, key()}, From :: any(), #state{}
-                        | invalid_message)
+                        | invalid_message, From :: term, #state{})
                         -> {reply, Reply :: {ok, pid()} | [node()] | integer(), #state{}}.
 handle_call(get_status, _From, State) ->
     %Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
@@ -132,9 +133,6 @@ handle_call(get_nodes, _From, State) ->
     Nodes = [Node || {Node, _} <- State#state.nodes],
     {reply, Nodes, State};
 
-handle_call({start_function, Key, Function}, _From, State) ->
-    {Pid, NewState} = start_function(Key, Function, State),
-    {reply, Pid, NewState};
 
 handle_call({get_pid, Key}, _From, State) ->
     %% This is called by get_pid_remote. Send back a message with the
@@ -147,6 +145,8 @@ handle_call(Message, From, State) ->
     {reply, invalid_message, State}.
 
 -spec handle_cast(Cast  :: {register_node, node()}
+                        | {start_function, key(), fun()} 
+                        | {get_pid, key()}
                         | broadcast_node, #state{}) -> {noreply, #state{}}.
 handle_cast({register_node, Node}, State) ->
     %% Register that we heard from a node. Set the last checkin time to now().
@@ -167,16 +167,30 @@ handle_cast(broadcast_node, State) ->
     gen_server:abcast(nodes(), ?SERVER, {register_node, node()}),
     {noreply, State#state { nodes=NewNodes }};
 
+handle_cast({start_function, Key, Function}, State) ->
+    Pid = erlang:spawn_monitor(Function),
+    handle_cast({register_no_monitor, Key, Pid}, State);
+
+handle_cast({register_pid, Key, Pid}, State) ->
+    erlang:monitor(Pid),
+    handle_cast({register_no_monitor, Key, Pid}, State);
+
+handle_cast({register_no_monitor, Key, Pid}, State) ->
+    Pids = State#state.pids,
+    NewPids = [{Key, Pid} | Pids],
+    NewState = State#state{pids=NewPids},
+    {noreply, NewState};
+
 %% @private
 handle_cast(Message, State) -> 
     error_logger:error_msg("Unhandled Cast: ~p~n",[Message]),
     {noreply, State}.
 
--spec handle_info(Info  :: {'EXIT', pid(), Reason :: any()}
+-spec handle_info(Info  :: {'DOWN', term(), process, pid(), _Info :: any()}
                         | any(), #state{})
                     -> {noreply, #state{}}.
 %% @private
-handle_info({'EXIT', Pid, _Reason}, State) ->
+handle_info({'DOWN', _MonitorRef, _Type, Pid, _Info}, State) ->
     %% A process died, so remove it from our list of pids.
     NewPids = lists:keydelete(Pid, 2, State#state.pids),
     {noreply, State#state { pids=NewPids }};
@@ -201,12 +215,3 @@ get_pid_local(Key, State) ->
         false ->
             undefined
     end.
-
--spec start_function(key(), fun(), #state{}) -> {pid(), #state{}}.
-start_function(Key, Function, State) ->
-    %% Create the function, register locally.
-    Pid = erlang:spawn_link(Function),
-    NewPids = [{Key, Pid}|State#state.pids],
-    NewState = State#state { pids=NewPids },
-    {Pid, NewState}.
-    
