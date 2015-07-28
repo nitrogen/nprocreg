@@ -23,6 +23,7 @@
 -define(SERVER, ?MODULE).
 -define(TABLE, nprocreg_data).
 -define(INDEX, nprocreg_index).
+-define(NODE_CACHE, nprocreg_nodes).
 -define(COLLECT_TIMEOUT, timer:seconds(2)).
 -define(NODE_CHATTER_INTERVAL, timer:seconds(5)).
 -define(NODE_TIMEOUT, timer:seconds(10)).
@@ -91,7 +92,7 @@ format_lookup(Res) ->
 -spec get_nodes() -> [node()].
 %% @doc Get the list of nodes that are alive, sorted in ascending order...
 get_nodes() ->
-    simple_cache:get(nprocreg, 1000, nodes, fun() ->
+    simple_cache:get(?NODE_CACHE, 1000, nodes, fun() ->
         lists:sort([Node || Node <- gen_server:call(?SERVER, get_nodes),
             (net_adm:ping(Node)=:=pong orelse Node=:=node())])
     end).
@@ -124,7 +125,7 @@ init(_) ->
     % Detect when a process goes down so that we can remove it from
     % the registry.
     process_flag(trap_exit, true),
-
+    simple_cache:init(?NODE_CACHE),
     %% Broadcast to all nodes at intervals...
     gen_server:cast(?SERVER, broadcast_node),
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
