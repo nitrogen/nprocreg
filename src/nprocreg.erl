@@ -151,7 +151,7 @@ handle_call(Message, From, State) ->
 handle_cast({register_node, Node}, State) ->
     %% Register that we heard from a node. Set the last checkin time to now().
     Nodes = State#state.nodes,
-    NewNodes = lists:keystore(Node, 1, Nodes, {Node, now()}),
+    NewNodes = lists:keystore(Node, 1, Nodes, {Node, os:timestamp()}),
     NewState = State#state { nodes=NewNodes },
     {noreply, NewState};
 
@@ -159,7 +159,7 @@ handle_cast(broadcast_node, State) ->
     %% Remove any nodes that haven't contacted us in a while...
     F = fun({_Node, LastContact}) ->
         (LastContact == never_expire) orelse
-        (timer:now_diff(now(), LastContact) / 1000) < ?NODE_TIMEOUT
+        (timer:now_diff(os:timestamp(), LastContact) / 1000) < ?NODE_TIMEOUT
     end,
     NewNodes = lists:filter(F, State#state.nodes),
 
