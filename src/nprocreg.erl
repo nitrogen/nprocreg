@@ -27,9 +27,13 @@
 -define(NODE_TIMEOUT, timer:seconds(10)).
 -define(PRINT(Var), error_logger:info_msg("DEBUG: ~p:~p~n~p~n  ~p~n", [?MODULE, ?LINE, ??Var, Var])).
 
+-record(proc, {key, pid}).
+
 -record(state, {
         nodes=[]    :: [{node(), last_contact()}],
-        pids=[]     :: [{key(), pid()}] 
+        proc_tid         :: atom(),
+        index_tid        :: atom()
+        %pids=[]     :: [{key(), pid()}] 
     }).
 
 -spec start_link() -> {ok, pid()}.
@@ -112,10 +116,24 @@ init(_) ->
     % the registry.
     process_flag(trap_exit, true),
 
+    BaseOptions = [
+        {read_concurrency, true},
+        protected,
+        set
+    ],
+
+    ProcOptions = [{keypos, #proc.key} | BaseOptions],
+    IndexOptions = [{keypos, #proc.pid} | BaseOptions],
+
+    ProcTid = ets:new(nprocreg_proc, ProcOptions),
+    IndexTid = ets:new(nprocreg_index, IndexOptions),
+
+    error_logger:info_msg("nprocreg tables initialized: ~p and ~p",[ProcTid, IndexTid]),
+
     %% Broadcast to all nodes at intervals...
     gen_server:cast(?SERVER, broadcast_node),
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
-    {ok, #state{ nodes=[{node(), never_expire}] }}.
+    {ok, #state{proc_tid=ProcTid, index_tid=IndexTid, nodes=[{node(), never_expire}] }}.
 
 -spec handle_call(Call  :: get_status
                         | get_nodes 
@@ -123,9 +141,9 @@ init(_) ->
                         | {get_pid, key()}, From :: any(), #state{}
                         | invalid_message)
                         -> {reply, Reply :: {ok, pid()} | [node()] | integer(), #state{}}.
-handle_call(get_status, _From, State) ->
+handle_call(get_status, _From, State = #state{proc_tid=Tid}) ->
     %Nodes = lists:sort([Node || {Node, _} <- State#state.nodes, net_admin:ping(Node) == pong]),
-    NumLocalPids = length(State#state.pids),
+    NumLocalPids = ets:info(Tid, size),
     {reply, NumLocalPids, State};
 
 handle_call(get_nodes, _From, State) ->
@@ -151,7 +169,7 @@ handle_call(Message, From, State) ->
 handle_cast({register_node, Node}, State) ->
     %% Register that we heard from a node. Set the last checkin time to now().
     Nodes = State#state.nodes,
-    NewNodes = lists:keystore(Node, 1, Nodes, {Node, now()}),
+    NewNodes = lists:keystore(Node, 1, Nodes, {Node, os:timestamp()}),
     NewState = State#state { nodes=NewNodes },
     {noreply, NewState};
 
@@ -159,7 +177,7 @@ handle_cast(broadcast_node, State) ->
     %% Remove any nodes that haven't contacted us in a while...
     F = fun({_Node, LastContact}) ->
         (LastContact == never_expire) orelse
-        (timer:now_diff(now(), LastContact) / 1000) < ?NODE_TIMEOUT
+        (timer:now_diff(os:timestamp(), LastContact) / 1000) < ?NODE_TIMEOUT
     end,
     NewNodes = lists:filter(F, State#state.nodes),
 
@@ -176,10 +194,19 @@ handle_cast(Message, State) ->
                         | any(), #state{})
                     -> {noreply, #state{}}.
 %% @private
-handle_info({'EXIT', Pid, _Reason}, State) ->
+handle_info({'EXIT', Pid, _Reason}, State = #state{proc_tid=ProcTid, index_tid=IndexTid}) ->
     %% A process died, so remove it from our list of pids.
-    NewPids = lists:keydelete(Pid, 2, State#state.pids),
-    {noreply, State#state { pids=NewPids }};
+    %NewPids = lists:keydelete(Pid, 2, State#state.pids),
+    
+    %% Find the proc matching Pid (should be one, but we'll be safe here)
+    Procs = ets:lookup(IndexTid, Pid),
+    %% Then clear out the elements from our index
+    ets:delete(IndexTid, Pid),
+
+    %% Finally delete the matching key(s) we found from our index
+    [ets:delete(ProcTid, Proc#proc.key) || Proc <- Procs],
+        
+    {noreply, State};
 
 handle_info(_Message, State) ->
     {noreply, State}.
@@ -191,22 +218,30 @@ terminate(_Reason, _State) -> ok.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 -spec get_pid_local(key(), #state{}) -> undefined | {ok, pid()}.
-get_pid_local(Key, State) ->
+get_pid_local(Key, #state{proc_tid=Tid}) ->
     %% Return the pid if it exists.
-    {_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
-    %error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
-    case KF of
-        {Key, Pid} ->
-            {ok, Pid};
-        false ->
-            undefined
+    %%{_Time, KF} = timer:tc(lists,keyfind,[Key, 1, State#state.pids]),
+
+    case ets:lookup(Tid, Key) of
+        [] -> undefined;
+        [#proc{pid=Pid} | _] -> {ok, Pid}
     end.
 
+    %error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
+%    case KF of
+%        {Key, Pid} ->
+%            {ok, Pid};
+%        false ->
+%            undefined
+%    end.
+
 -spec start_function(key(), fun(), #state{}) -> {pid(), #state{}}.
-start_function(Key, Function, State) ->
+start_function(Key, Function, State = #state{proc_tid=ProcTid, index_tid=IndexTid}) ->
     %% Create the function, register locally.
     Pid = erlang:spawn_link(Function),
-    NewPids = [{Key, Pid}|State#state.pids],
-    NewState = State#state { pids=NewPids },
-    {Pid, NewState}.
+    Proc = #proc{pid=Pid, key=Key},
+    ets:insert(ProcTid, Proc),
+    ets:insert(IndexTid, Proc),
+    {Pid, State}.
     
+
