@@ -13,6 +13,8 @@
     get_pid/1,
     get_pid/2,
     get_status/0,
+    register_pid/2,
+    unregister_key/1,
     init/1,
     handle_cast/2,
     handle_call/3,
@@ -63,8 +65,11 @@ get_pid(Key, Function) ->
 
 -spec register_pid(key(), pid()) -> ok.
 register_pid(Key, Pid) ->
-    gen_server:cast({?SERVER, Node}, {register_pid, Key, Pid}).
+    gen_server:cast({?SERVER, node()}, {register_pid, Key, Pid}).
 
+-spec unregister_key(key()) -> ok.
+unregister_key(Key) ->
+    gen_server:cast({?SERVER, node()}, {unregister_key, Key}).
      
 
 -spec get_pid_from_nodes([node()], key()) -> undefined | {ok, pid()}.      
@@ -102,12 +107,12 @@ get_nodes() ->
 -spec maybe_start_function_on_node(node(), key(), fun() | undefined) -> undefined | {ok, pid()}.
 maybe_start_function_on_node(_Node, _Key, undefined) ->
     undefined;
-maybe_start_function_on_node(Node, Key, Fun) when is_function(Fun, 1) ->
+maybe_start_function_on_node(Node, Key, Fun) when is_function(Fun, 0) ->
     start_function_on_node(Node, Key, Fun).
 
 -spec start_function_on_node(node(), key(), fun() | undefined) -> {ok, pid()}.
 start_function_on_node(Node , Key, Function) ->
-    gen_server:cast({?SERVER, Node}, {start_function, Key, Function}).
+    gen_server:call({?SERVER, Node}, {start_function, Key, Function}).
 
 -spec get_nodes(key()) -> {node(), [node()]}.
 %% @doc Retrieves a list of nodes, with the first node being the most likely
@@ -116,7 +121,7 @@ get_nodes(Key) ->
     Nodes = get_nodes(),
 
     %% Get an MD5 of the Key...
-    <<Int:128/integer>> = erlang:md5(term_to_binary(Key)),
+    <<Int:128/integer>> = crypto:hash(md5, term_to_binary(Key)),
 
     %% Hash to a node...
     N = (Int rem length(Nodes)) + 1,
@@ -130,16 +135,13 @@ get_status() ->
     
 -spec init(term()) -> {ok, #state{}}.
 init(_) -> 
-    % Detect when a process goes down so that we can remove it from
-    % the registry.
-    process_flag(trap_exit, true),
     simple_cache:init(?NODE_CACHE),
 
     %% Broadcast to all nodes at intervals...
     gen_server:cast(?SERVER, broadcast_node),
     timer:apply_interval(?NODE_CHATTER_INTERVAL, gen_server, cast, [?SERVER, broadcast_node]),
     ?TABLE = ets:new(?TABLE, [named_table, set, protected, {keypos, 1}, {read_concurrency, true}]),
-    ?INDEX = ets:new(?INDEX, [named_table, set, private, {keypos, 1}]),
+    ?INDEX = ets:new(?INDEX, [named_table, set, protected, {keypos, 1}, {read_concurrency, true}]),
     {ok, #state{ nodes=[{node(), never_expire}] }}.
 
 -spec handle_call(Call  :: get_status
@@ -154,6 +156,10 @@ handle_call(get_nodes, _From, State) ->
     Nodes = [Node || {Node, _} <- State#state.nodes],
     {reply, Nodes, State};
 
+handle_call({start_function, Key, Function}, _From, State) ->
+    {Pid, _Monitor} = erlang:spawn_monitor(Function),
+    store_key(Key, Pid),
+    {reply, Pid, State};
 
 handle_call(Message, From, State) ->
     error_logger:error_msg("Unhandled Call from ~p: ~p~n",[From,Message]),
@@ -182,24 +188,24 @@ handle_cast(broadcast_node, State) ->
     gen_server:abcast(nodes(), ?SERVER, {register_node, node()}),
     {noreply, State#state { nodes=NewNodes }};
 
-handle_cast({start_function, Key, Function}, State) ->
-    Pid = erlang:spawn_monitor(Function),
-    handle_cast({register_no_monitor, Key, Pid}, State);
-
 handle_cast({register_pid, Key, Pid}, State) ->
-    erlang:monitor(Pid),
-    handle_cast({register_no_monitor, Key, Pid}, State);
+    erlang:monitor(process, Pid),
+    store_key(Key, Pid),
+    {noreply, State};
 
-handle_cast({register_no_monitor, Key, Pid}, State) ->
-    ets:insert(?TABLE, {Key, Pid}),
-    ets:insert(?INDEX, {Pid, Key}),
-    NewState = State#state{},
-    {noreply, NewState};
+handle_cast({unregister_key, Key}, State) ->
+    delete_key(Key),
+    %% TODO: Store the monitor and use demonitor as well. Not essential right now.
+    {noreply, State};
 
-%% @private
 handle_cast(Message, State) -> 
     error_logger:error_msg("Unhandled Cast: ~p~n",[Message]),
     {noreply, State}.
+
+store_key(Key, Pid) ->
+    ets:insert(?TABLE, {Key, Pid}),
+    ets:insert(?INDEX, {Pid, Key}).
+
 
 -spec handle_info(Info  :: {'DOWN', term(), process, pid(), _Info :: any()}
                         | any(), #state{})
@@ -228,10 +234,11 @@ delete_pid(Pid) ->
             ok
     end.
 
-    %error_logger:info_msg("get_pid_local_time for ~p in list ~p: ~p microsec~n",[Key, length(State#state.pids), Time]),
-%    case KF of
-%        {Key, Pid} ->
-%            {ok, Pid};
-%        false ->
-%            undefined
-%    end.
+delete_key(Key) ->
+    case ets:lookup(?TABLE, Key) of
+        [{Key, Pid}] ->
+            ets:delete(?TABLE, Key),
+            ets:delete(?INDEX, Pid);
+        [] ->
+            ok
+    end.
