@@ -146,7 +146,7 @@ init(_) ->
 
 -spec handle_call(Call  :: get_status
                         | get_nodes 
-                        | invalid_message, From :: term, #state{})
+                        | invalid_message, From :: term(), #state{})
                         -> {reply, Reply :: {ok, pid()} | [node()] | integer(), #state{}}.
 handle_call(get_status, _From, State = #state{}) ->
     NumLocalPids = ets:info(?TABLE, size),
