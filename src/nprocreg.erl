@@ -93,8 +93,8 @@ format_lookup([]) ->
     undefined;
 format_lookup({badrpc, _}) ->
     undefined;
-format_lookup(Res) ->
-    {ok, Res}.
+format_lookup([{_Key, Pid}]) ->
+    {ok, Pid}.
 
 -spec get_nodes() -> [node()].
 %% @doc Get the list of nodes that are alive, sorted in ascending order...
