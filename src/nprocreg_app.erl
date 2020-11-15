@@ -10,7 +10,7 @@ start() ->
     start(ignored, []).
 
 start(_Type, StartArgs) ->
-    application:start(simple_cache),
+    application:start(nitro_cache),
     case nprocreg_sup:start_link(StartArgs) of
         {ok, Pid} ->
             {ok, Pid};
