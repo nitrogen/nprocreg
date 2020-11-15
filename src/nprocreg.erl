@@ -99,7 +99,7 @@ format_lookup([{_Key, Pid}]) ->
 -spec get_nodes() -> [node()].
 %% @doc Get the list of nodes that are alive, sorted in ascending order...
 get_nodes() ->
-    simple_cache:get(?NODE_CACHE, 1000, nodes, fun() ->
+    nitro_cache:get(?NODE_CACHE, 1000, nodes, fun() ->
         lists:sort([Node || Node <- gen_server:call(?SERVER, get_nodes),
             (net_adm:ping(Node)=:=pong orelse Node=:=node())])
     end).
@@ -135,7 +135,7 @@ get_status() ->
     
 -spec init(term()) -> {ok, #state{}}.
 init(_) -> 
-    simple_cache:init(?NODE_CACHE),
+    nitro_cache:init(?NODE_CACHE),
 
     %% Broadcast to all nodes at intervals...
     gen_server:cast(?SERVER, broadcast_node),
