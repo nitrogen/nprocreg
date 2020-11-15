@@ -3,5 +3,6 @@
     {vsn,          "0.3.0"},
     {applications, [kernel, stdlib, nitro_cache]},
     {registered,   []},
-    {mod,          {nprocreg_app, []}}
+    {mod,          {nprocreg_app, []}},
+	{licenses,	   ["MIT"]}
 ]}.

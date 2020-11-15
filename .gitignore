@@ -1,3 +1,5 @@
 *.beam
 *~
 *.sw?
+_build
+ebin/
