@@ -9,6 +9,6 @@ case erlang:function_exported(rebar3, main, 1) of
         %% Rebuild deps, possibly including those that have been moved to
         %% profiles
         [{deps, [
-            {nitro_cache, {git, "git://github.com/nitrogen/nitro_cache", {branch, master}}}
+            {nitro_cache, {git, "https://github.com/nitrogen/nitro_cache", {branch, master}}}
         ]} | lists:keydelete(deps, 1, CONFIG)]
 end.
